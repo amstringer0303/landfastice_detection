@@ -1,4 +1,4 @@
-# U-Net Arctic Sea Ice Classification Pipeline
+# U-Net Arctic Landfast Ice Classification Pipeline
 
 This repository contains a modular deep learning pipeline for classifying sea ice features in Arctic coastal environments using Sentinel-2 RGB imagery, with a focus on **accurate landfast ice edge detection**. The model uses a 4-channel input (RGB + distance-to-coast) and predicts per-pixel semantic classes.
 
