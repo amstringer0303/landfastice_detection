@@ -2,7 +2,7 @@
 
 This repository contains a modular deep learning pipeline for **semantic segmentation of Arctic coastal sea ice features** using Sentinel-2 RGB imagery. The model is trained to detect and map the **landfast ice edge**, distinguishing it from open water, drift ice, and transitional zones.
 
-The pipeline leverages a 4-channel input structure — combining RGB with a computed **distance-to-coast raster** — and uses a lightweight U-Net model trained on a curated subset of hand-labeled imagery. Once trained, the model is applied to a much larger set of scenes for full-coverage prediction.
+The pipeline uses a 4-channel input — combining RGB with a computed **distance-to-coast raster** — and leverages a lightweight U-Net model trained on 5 hand-labeled scenes. Once trained, the model is applied to 180+ full Sentinel-2 scenes for prediction.
 
 ---
 
@@ -29,43 +29,111 @@ The pipeline leverages a 4-channel input structure — combining RGB with a comp
 
 ## 🛠️ Processing Steps
 
-### 1. Distance-to-Coast Raster Generation
+### 1. Distance-to-Coast Raster Generation  
 **Script:** `generate_all_distance_rasters.py`
 
 - Reprojects the coastline shapefile to match each image’s CRS
 - Rasterizes a binary coastline mask
 - Computes a **Euclidean distance transform**
-- Outputs distance rasters for all RGBs as `*_distance_to_coast.tif`
+- Saves per-image rasters as:  
+  `Sentinel2_Wainwright_AK_YYYYMMDD[_version]_distance_to_coast.tif`
 
 ---
 
-### 2. Label Mask Rasterization (Training Only)
+### 2. Label Mask Rasterization (Training Only)  
 **Script:** `rasterize.py`
 
-- Rasterizes annotated training polygons into full-scene categorical masks
-- Buffers inland zones to avoid ambiguous labels
-- Saves aligned masks (same CRS, resolution, transform as RGBs)
+- Rasterizes hand-labeled polygons with `class_id` (0–3)
+- Buffers the inland region to exclude ambiguous zones
+- Applies `255 = NODATA` for excluded areas
+- Outputs full-scene label masks aligned with RGB images
 
 ---
 
-### 3. Tiling for Training
+### 3. Tiling for Training  
 **Script:** `tiling_wfeatures.py`
 
-- Loads RGB + distance + mask triplets for the **5 labeled scenes**
-- Tiles into 320×320 windows (stride: 240)
+- Loads:
+  - RGB image
+  - Distance-to-coast raster
+  - Label mask
+- Tiles into 320×320 windows with 240 stride
 - Skips tiles with >20% NODATA
 - Saves:
-  - `tiles/images/` — 4-band RGBD training tiles
-  - `tiles/masks/` — 1-band class masks
-  - `tiles/distance/` — distance tiles used in stacking
+  - `tiles/images/` → 4-channel RGB + distance
+  - `tiles/masks/` → 1-channel label masks
+  - `tiles/distance/` → distance tiles
 
 ---
 
-### 4. Model Training
+### 4. Model Training  
 **Script:** `train.py`
 
-- Loads RGBD training tiles and masks
-- Applies a **U-Net model** with 4-channel input and 4 softmax output classes
-- Uses **weighted categorical cross-entropy** with:
+- Loads 4-band RGBD training tiles and masks
+- Builds a lightweight U-Net model:
+  - Input: `(320, 320, 4)`
+  - Output: `(320, 320, 4)` softmax probabilities
+- Uses **weighted categorical cross-entropy loss**:
   ```python
   class_weights = [3.0, 3.0, 1.0, 0.5]
+  ```
+- Splits dataset:
+  - 80% training
+  - 10% validation
+  - 10% test
+- Trains for **30 epochs**
+- Saves model to:
+  ```
+  ~/Desktop/unet-4class-RGBD.keras
+  ```
+
+---
+
+### 5. Full-Scene Inference: Tiling for Prediction
+
+**Script:** `tile_for_inference.py`
+
+- Scans all RGB `.tif` files in `/Volumes/toshiba/W`
+- Finds matching `_distance_to_coast.tif` files
+- Tiles the **entire scene** using:
+  - 320×320 tile size
+  - 240 stride
+  - Padded edge tiles if needed
+- Saves:
+  - `tiles_infer/images/` → RGB tiles
+  - `tiles_infer/distance/` → distance tiles
+
+---
+
+### 6. Model Prediction and Stitching
+
+**Script:** `predict_and_stitch.py`
+
+- Loads the trained model from `~/Desktop/unet-4class-RGBD.keras`
+- For each tile:
+  - Loads RGB + distance → 4-band input
+  - Predicts class probabilities
+  - Takes `argmax` to get final class mask
+- Reassembles predictions into full-scene raster
+- Creates color-coded overlays
+- Saves to:
+  - `predictions/*_stitched_overlay.png`
+  - *(Optional)*: predicted raw masks or extracted boundaries
+
+---
+
+## 🔍 Coming Soon (Optional Add-ons)
+
+- **`extract_landfast_edge.py`**  
+  Automatically vectorizes class 1 (landfast ice) edges into GeoJSON
+
+- **Evaluation Utilities**
+  - IoU / accuracy calculation on held-out annotated tiles
+  - Confusion matrices
+  - Visual diff overlays
+
+## 👩‍💻 Maintainer
+
+Ana Stringer — [@amstringer0303](https://github.com/amstringer0303)
+
+---
