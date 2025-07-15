@@ -1,68 +1,71 @@
 # U-Net Arctic Landfast Ice Classification Pipeline
 
-This repository contains a modular deep learning pipeline for classifying sea ice features in Arctic coastal environments using Sentinel-2 RGB imagery, with a focus on **accurate landfast ice edge detection**. The model uses a 4-channel input (RGB + distance-to-coast) and predicts per-pixel semantic classes.
+This repository contains a modular deep learning pipeline for **semantic segmentation of Arctic coastal sea ice features** using Sentinel-2 RGB imagery. The model is trained to detect and map the **landfast ice edge**, distinguishing it from open water, drift ice, and transitional zones.
+
+The pipeline leverages a 4-channel input structure — combining RGB with a computed **distance-to-coast raster** — and uses a lightweight U-Net model trained on a curated subset of hand-labeled imagery. Once trained, the model is applied to a much larger set of scenes for full-coverage prediction.
 
 ---
 
-## ❄️ Target Classes
+## ❄️ Semantic Classes
 
-| Class ID | Label            |
-|----------|------------------|
-| 0        | Open Water       |
-| 1        | Landfast Ice     |
-| 2        | Drift Ice        |
-| 3        | Transition Ice   |
-| 255      | NODATA (masked)  |
+| Class ID | Label           |
+|----------|-----------------|
+| 0        | Open Water      |
+| 1        | Landfast Ice    |
+| 2        | Drift Ice       |
+| 3        | Transition Ice  |
+| 255      | NODATA (masked) |
 
 ---
 
-## 🧭 Pipeline Overview
+## 📁 Pipeline Overview
 
 ### Inputs:
-- **Sentinel-2 RGB images** (`.tif`)
-- **Training polygons** (`.geojson`) with `class_id` field
-- **Coastline GeoJSON** (`ALASKA_63360_LN.geojson`)
+- Sentinel-2 RGB imagery (`.tif`)
+- GeoJSON polygons (`.geojson`) with `class_id` field for training
+- Coastline geometry (`ALASKA_63360_LN.geojson`)
 
 ---
+
+## 🛠️ Processing Steps
 
 ### 1. Distance-to-Coast Raster Generation
-**`distance_to_coast.py`**
+**Script:** `generate_all_distance_rasters.py`
 
-- Reprojects the coastline to each image's CRS
-- Rasterizes the coastline mask
-- Computes a Euclidean distance transform from the coastline
-- Saves per-image distance rasters (`_distance_to_coast.tif`)
-
----
-
-### 2. Label Mask Rasterization
-**`rasterize.py`**
-
-- Rasterizes training polygons with `class_id` values (0–3)
-- Buffers the coastline to mask inland/ambiguous zones
-- Outputs NODATA=255 where excluded
-- Saves full-scene masks aligned to RGB images
+- Reprojects the coastline shapefile to match each image’s CRS
+- Rasterizes a binary coastline mask
+- Computes a **Euclidean distance transform**
+- Outputs distance rasters for all RGBs as `*_distance_to_coast.tif`
 
 ---
 
-### 3. Tiling
-**`tiling_wfeatures.py`**
+### 2. Label Mask Rasterization (Training Only)
+**Script:** `rasterize.py`
 
-- Matches each RGB image with its:
-  - Distance-to-coast raster
-  - Rasterized mask
-- Splits into 320×320 tiles with stride 240
+- Rasterizes annotated training polygons into full-scene categorical masks
+- Buffers inland zones to avoid ambiguous labels
+- Saves aligned masks (same CRS, resolution, transform as RGBs)
+
+---
+
+### 3. Tiling for Training
+**Script:** `tiling_wfeatures.py`
+
+- Loads RGB + distance + mask triplets for the **5 labeled scenes**
+- Tiles into 320×320 windows (stride: 240)
 - Skips tiles with >20% NODATA
 - Saves:
-  - **4-band RGB + distance tiles** → `tiles/images/`
-  - **1-band label masks** → `tiles/masks/`
+  - `tiles/images/` — 4-band RGBD training tiles
+  - `tiles/masks/` — 1-band class masks
+  - `tiles/distance/` — distance tiles used in stacking
 
 ---
 
 ### 4. Model Training
-**`train.py`**
+**Script:** `train.py`
 
-- Loads 4-channel input tiles and 1-channel categorical masks
-- Uses **weighted categorical cross-entropy loss**:
+- Loads RGBD training tiles and masks
+- Applies a **U-Net model** with 4-channel input and 4 softmax output classes
+- Uses **weighted categorical cross-entropy** with:
   ```python
   class_weights = [3.0, 3.0, 1.0, 0.5]
