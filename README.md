@@ -122,7 +122,7 @@ The pipeline uses a 4-channel input — combining RGB with a computed **distance
 
 ---
 
-## 🔍 Coming Soon (Optional Add-ons)
+## 🔍 Coming Soon 
 
 - **`extract_landfast_edge.py`**  
   Automatically vectorizes class 1 (landfast ice) edges into GeoJSON
