@@ -6,7 +6,7 @@ The pipeline uses a 4-channel input — combining RGB with a computed **distance
 
 ---
 
-## ❄️ Semantic Classes
+## Semantic Classes
 
 | Class ID | Label           |
 |----------|-----------------|
@@ -18,7 +18,7 @@ The pipeline uses a 4-channel input — combining RGB with a computed **distance
 
 ---
 
-## 📁 Pipeline Overview
+## Pipeline Overview
 
 ### Inputs:
 - Sentinel-2 RGB imagery (`.tif`)
@@ -27,7 +27,7 @@ The pipeline uses a 4-channel input — combining RGB with a computed **distance
 
 ---
 
-## 🛠️ Processing Steps
+##  Processing Steps
 
 ### 1. Distance-to-Coast Raster Generation  
 **Script:** `generate_all_distance_rasters.py`
@@ -122,7 +122,7 @@ The pipeline uses a 4-channel input — combining RGB with a computed **distance
 
 ---
 
-## 🔍 Coming Soon 
+## Coming Soon 
 
 - **`extract_landfast_edge.py`**  
   Automatically vectorizes class 1 (landfast ice) edges into GeoJSON
@@ -132,7 +132,7 @@ The pipeline uses a 4-channel input — combining RGB with a computed **distance
   - Confusion matrices
   - Visual diff overlays
 
-## 👩‍💻 Maintainer
+## Maintainer
 
 Ana Stringer — [@amstringer0303](https://github.com/amstringer0303)
 
