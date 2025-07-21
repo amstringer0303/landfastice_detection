@@ -7,23 +7,23 @@ from shapely.geometry import mapping
 
 # === INPUT CONFIGURATION ===
 image_paths = [
-    "/Volumes/toshiba/W/2019/Sentinel2_Wainwright_AK_20190301.tif",
-    "/Volumes/toshiba/W/2022/Sentinel2_Wainwright_AK_20220310.tif",
-    "/Volumes/toshiba/W/2022/Sentinel2_Wainwright_AK_20220418_fixed.tif",
-    "/Volumes/toshiba/W/2023/Sentinel2_Wainwright_AK_20230423.tif",
-    "/Volumes/toshiba/W/2024/Sentinel2_Wainwright_AK_20240306.tif"
+    r"D:\W\2019\Sentinel2_Wainwright_AK_20190301.tif",
+    r"D:\W\2022\Sentinel2_Wainwright_AK_20220310.tif",
+    r"D:\W\2022\Sentinel2_Wainwright_AK_20220418.tif",
+    r"D:\W\2023\Sentinel2_Wainwright_AK_20230423.tif",
+    r"D:\W\2024\Sentinel2_Wainwright_AK_20240306.tif"
 ]
 
 label_paths = {
-    "20190301": "/Volumes/toshiba/UNET/20190301.geojson",
-    "20220310": "/Volumes/toshiba/UNET/20220310.geojson",
-    "20220418": "/Volumes/toshiba/UNET/20220418.geojson",
-    "20230423": "/Volumes/toshiba/UNET/20230423.geojson",
-    "20240306": "/Volumes/toshiba/UNET/20240306.geojson"
+    "20190301": r"D:\UNET\20190301.geojson",
+    "20220310": r"D:\UNET\20220310.geojson",
+    "20220418": r"D:\UNET\20220418.geojson",
+    "20230423": r"D:\UNET\20230423.geojson",
+    "20240306": r"D:\UNET\20240306.geojson"
 }
 
-coastline_path = "/Volumes/toshiba/UNET/ALASKA_63360_LN.geojson"
-output_dir = "/Volumes/toshiba/UNET/masks_rasterized/"
+coastline_path = r"D:\UNET\ALASKA_63360_LN.geojson"
+output_dir = r"D:\UNET\masks_rasterized"
 NODATA_VALUE = 255
 os.makedirs(output_dir, exist_ok=True)
 
