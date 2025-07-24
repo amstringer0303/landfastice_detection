@@ -1,119 +1,92 @@
 import os
+import geopandas as gpd
 import rasterio
 import rasterio.features
-import geopandas as gpd
 import numpy as np
-from shapely.geometry import mapping
 
-# === INPUT CONFIGURATION ===
-image_paths = [
-    r"D:\W\2019\Sentinel2_Wainwright_AK_20190301.tif",
-    r"D:\W\2022\Sentinel2_Wainwright_AK_20220310.tif",
-    r"D:\W\2022\Sentinel2_Wainwright_AK_20220418.tif",
-    r"D:\W\2023\Sentinel2_Wainwright_AK_20230423.tif",
-    r"D:\W\2024\Sentinel2_Wainwright_AK_20240306.tif"
-]
-
-label_paths = {
-    "20190301": r"D:\UNET\20190301.geojson",
-    "20220310": r"D:\UNET\20220310.geojson",
-    "20220418": r"D:\UNET\20220418.geojson",
-    "20230423": r"D:\UNET\20230423.geojson",
-    "20240306": r"D:\UNET\20240306.geojson"
+# === CONFIGURATION ===
+scenes = {
+    "Sentinel2_Wainwright_AK_20190301": {
+        "rgb": r"D:\W\2019\Sentinel2_Wainwright_AK_20190301.tif",
+        "geojson": r"D:\UNET\20190301.geojson",
+        "landmask": r"D:\UNET\landmask\Sentinel2_Wainwright_AK_20190301_landmask.tif"
+    },
+    "Sentinel2_Wainwright_AK_20220310": {
+        "rgb": r"D:\W\2022\Sentinel2_Wainwright_AK_20220310.tif",
+        "geojson": r"D:\UNET\20220310.geojson",
+        "landmask": r"D:\UNET\landmask\Sentinel2_Wainwright_AK_20220310_landmask.tif"
+    },
+    "Sentinel2_Wainwright_AK_20220418": {
+        "rgb": r"D:\W\2022\Sentinel2_Wainwright_AK_20220418.tif",
+        "geojson": r"D:\UNET\20220418.geojson",
+        "landmask": r"D:\UNET\landmask\Sentinel2_Wainwright_AK_20220418_landmask.tif"
+    },
+    "Sentinel2_Wainwright_AK_20230423": {
+        "rgb": r"D:\W\2023\Sentinel2_Wainwright_AK_20230423.tif",
+        "geojson": r"D:\UNET\20230423.geojson",
+        "landmask": r"D:\UNET\landmask\Sentinel2_Wainwright_AK_20230423_landmask.tif"
+    },
+    "Sentinel2_Wainwright_AK_20240306": {
+        "rgb": r"D:\W\2024\Sentinel2_Wainwright_AK_20240306.tif",
+        "geojson": r"D:\UNET\20240306.geojson",
+        "landmask": r"D:\UNET\landmask\Sentinel2_Wainwright_AK_20240306_landmask.tif"
+    }
 }
 
-coastline_path = r"D:\UNET\ALASKA_63360_LN.geojson"
 output_dir = r"D:\UNET\masks_rasterized"
-NODATA_VALUE = 255
 os.makedirs(output_dir, exist_ok=True)
 
-# === LOAD AND PREPROCESS COASTLINE ===
-coast_gdf = gpd.read_file(coastline_path)
-coastline_buffered = coast_gdf.buffer(-10)
-print("🌊 Coastline loaded and buffered.")
+# === LOOP THROUGH EACH SCENE ===
+for scene, paths in scenes.items():
+    print(f"\n🖍️ Rasterizing: {scene}")
 
-# === RASTERIZE LOOP ===
-for image_path in image_paths:
-    base = os.path.basename(image_path)
-    img_name = base.replace("Sentinel2_Wainwright_AK_", "").replace("_fixed.tif", "").replace(".tif", "")
-    label_path = label_paths.get(img_name)
+    with rasterio.open(paths["rgb"]) as ref:
+        shape = (ref.height, ref.width)
+        transform = ref.transform
+        crs = ref.crs
 
-    print(f"\n🔄 Rasterizing: {img_name}")
+    # Load GeoJSON and ensure proper CRS
+    gdf = gpd.read_file(paths["geojson"]).to_crs(crs)
 
-    if not os.path.exists(image_path):
-        print(f"❌ Image not found: {image_path}")
-        continue
-    if not os.path.exists(label_path):
-        print(f"❌ Label not found: {label_path}")
-        continue
+    # Initialize label_mask with 255 (NODATA) — will overwrite with valid classes
+    label_mask = np.full(shape, 255, dtype=np.uint8)
 
-    with rasterio.open(image_path) as src:
-        image_shape = (src.height, src.width)
-        transform = src.transform
-        crs = src.crs
-        print(f"📐 Image dimensions: {image_shape}, CRS: {crs}")
+    # Rasterize each class (0 to 3)
+    for class_id in sorted(gdf["class_id"].unique()):
+        class_polys = gdf[gdf["class_id"] == class_id]
+        if not class_polys.empty:
+            shapes = ((geom, class_id) for geom in class_polys.geometry if geom.is_valid)
+            mask_layer = rasterio.features.rasterize(
+                shapes=shapes,
+                out_shape=shape,
+                transform=transform,
+                fill=255,  # Leave other areas unchanged
+                dtype=np.uint8
+            )
+            label_mask[mask_layer == class_id] = class_id
 
-        if transform == rasterio.Affine.identity:
-            print(f"⚠️ {img_name} has identity transform — likely missing spatial placement.")
-        if crs is None:
-            print(f"⚠️ {img_name} has no CRS — image is not georeferenced.")
+    # Load and apply land mask (land = 1 → set to 255 in output mask)
+    with rasterio.open(paths["landmask"]) as land_src:
+        if land_src.crs != crs:
+            raise ValueError(f"CRS mismatch: {scene} — landmask {land_src.crs}, RGB {crs}")
+        land_mask = land_src.read(1)
+        label_mask[land_mask == 1] = 255
 
-    gdf = gpd.read_file(label_path).to_crs(crs)
-    coast_buffered_proj = gpd.GeoDataFrame(geometry=coastline_buffered, crs=coast_gdf.crs).to_crs(crs)
-
-    if 'class_id' not in gdf.columns:
-        raise ValueError(f"GeoJSON for {img_name} must have a 'class_id' column.")
-
-    valid_gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
-    if valid_gdf.empty:
-        print(f"⚠️ No valid geometries in {label_path} — skipping.")
-        continue
-
-    expected_classes = set(range(4))  # 0 to 3
-    found_classes = set(valid_gdf["class_id"].unique())
-    if not found_classes.issubset(expected_classes):
-        raise ValueError(f"❌ Unexpected class IDs in {img_name}: {found_classes - expected_classes}")
-
-    print(f"✅ {len(valid_gdf)} valid polygons retained for rasterization.")
-
-    # Rasterize class polygons
-    class_shapes = ((geom, int(class_id)) for geom, class_id in zip(valid_gdf.geometry, valid_gdf["class_id"]))
-    class_mask = rasterio.features.rasterize(
-        shapes=class_shapes,
-        out_shape=image_shape,
-        transform=transform,
-        fill=NODATA_VALUE,
-        dtype=np.uint8
-    )
-
-    # Apply coastline exclusion mask
-    coast_shapes = ((geom, NODATA_VALUE) for geom in coast_buffered_proj.geometry if geom.is_valid)
-    coast_mask = rasterio.features.rasterize(
-        shapes=coast_shapes,
-        out_shape=image_shape,
-        transform=transform,
-        fill=0,
-        dtype=np.uint8
-    )
-    class_mask[coast_mask == NODATA_VALUE] = NODATA_VALUE
-
-    # Pixel value summary
-    unique, counts = np.unique(class_mask, return_counts=True)
-    print("📊 Pixel distribution:", dict(zip(unique, counts)))
-
-    # Save to GeoTIFF
-    out_path = os.path.join(output_dir, f"{img_name}_mask.tif")
+    # Save output mask
+    out_path = os.path.join(output_dir, f"{scene.split('_')[-1]}_mask.tif")
     with rasterio.open(
-        out_path, 'w',
-        driver='GTiff',
-        height=class_mask.shape[0],
-        width=class_mask.shape[1],
+        out_path, "w",
+        driver="GTiff",
+        height=shape[0],
+        width=shape[1],
         count=1,
-        dtype=np.uint8,
+        dtype="uint8",
         crs=crs,
-        transform=transform,
-        nodata=NODATA_VALUE
+        transform=transform
     ) as dst:
-        dst.write(class_mask, 1)
+        dst.write(label_mask, 1)
 
+    # Print pixel distribution
+    unique, counts = np.unique(label_mask, return_counts=True)
+    print("📊 Final pixel distribution:", dict(zip(unique, counts)))
     print(f"✅ Saved: {out_path}")
