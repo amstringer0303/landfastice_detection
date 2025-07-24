@@ -1,111 +1,120 @@
-import numpy as np
-import tensorflow as tf
-import rasterio
-import glob
 import os
+import numpy as np
+import rasterio
+from glob import glob
 from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from tensorflow.keras import layers, models
 
-# === CONFIGURATION ===
-batch_size = 8
-epochs = 30
-optimizer = 'adam'
-loss = 'categorical_crossentropy'
-img_height = 320
-img_width = 320
-img_bands = 4  # <-- ✅ include 4 bands now (RGB + distance)
-num_classes = 4
+# === CONFIG ===
+rgb_dir = r"D:\UNET\tiles\images"
+dist_dir = r"D:\UNET\tiles\distance"
+mask_dir = r"D:\UNET\tiles\masks"
+model_path = r"D:\UNET\models\unet_landfastice_distance.keras"
+tile_size = 320
+n_classes = 4
+nodata_value = 255
 
-# === PATHS ===
-data_path = '/Volumes/toshiba/UNET/tiles/'
-distance_path = os.path.join(data_path, 'distance/')
-image_files = sorted(glob.glob(os.path.join(data_path, 'images/*.tif')))
-mask_files = sorted(glob.glob(os.path.join(data_path, 'masks/*.tif')))
+# === Load all tile sets ===
+rgb_tiles = sorted(glob(os.path.join(rgb_dir, "*.tif")))
+X = []
+y = []
 
-print(f"🖼️ Found {len(image_files)} images and {len(mask_files)} masks")
+print(f"📦 Loading {len(rgb_tiles)} tiles...")
 
-# === SPLIT DATA ===
-train_imgs, test_imgs, train_masks, test_masks = train_test_split(
-    image_files, mask_files, test_size=0.2, random_state=42
-)
-train_imgs, val_imgs, train_masks, val_masks = train_test_split(
-    train_imgs, train_masks, test_size=0.1, random_state=42
-)
-print(f"🔀 Data split: {len(train_imgs)} train / {len(val_imgs)} val / {len(test_imgs)} test")
+for rgb_tile in rgb_tiles:
+    base = os.path.basename(rgb_tile).replace(".tif", "")
+    row_col = "_".join(base.split("_")[-2:])
 
-# === DATA LOADING FUNCTIONS ===
-def load_geotiff_image_with_distance(image_path):
-    base = os.path.basename(image_path).replace('.tif', '')
-    dist_path = os.path.join(distance_path, f"{base}_distance.tif")
-    if not os.path.exists(dist_path):
-        raise FileNotFoundError(f"Distance raster not found for: {dist_path}")
+    dist_tile = os.path.join(dist_dir, f"{base}_distance.tif")
+    mask_tile = os.path.join(mask_dir, f"{base}.tif")
 
-    with rasterio.open(image_path) as src:
+    if not os.path.exists(dist_tile) or not os.path.exists(mask_tile):
+        continue
+
+    with rasterio.open(rgb_tile) as src:
         rgb = src.read([1, 2, 3]).astype(np.float32) / 255.0
-    with rasterio.open(dist_path) as dist_src:
-        dist = dist_src.read(1).astype(np.float32)
-        dist = np.expand_dims(dist, axis=0)  # shape: (1, H, W)
-        dist /= np.max(dist) if np.max(dist) != 0 else 1
 
-    rgbd = np.concatenate([rgb, dist], axis=0)
-    rgbd = np.moveaxis(rgbd, 0, -1)  # shape: (H, W, 4)
-    return rgbd
+    with rasterio.open(dist_tile) as src:
+        dist = src.read(1).astype(np.float32)
+        dist = (dist - dist.min()) / (dist.max() - dist.min() + 1e-6)
+        dist = dist[np.newaxis, :, :]
 
-def load_mask_image(mask_path):
-    with rasterio.open(mask_path) as src:
-        mask = src.read(1).astype(np.uint8)
-    mask = np.where(mask == 255, 0, mask)  # map NODATA to class 0
-    return tf.keras.utils.to_categorical(mask, num_classes=num_classes)
+    with rasterio.open(mask_tile) as src:
+        mask = src.read(1)
+        mask[mask == nodata_value] = 0  # Replace nodata with background (optional)
 
-def create_tf_dataset(image_paths, mask_paths):
-    images, masks = [], []
-    for img_path, mask_path in zip(image_paths, mask_paths):
-        images.append(load_geotiff_image_with_distance(img_path))
-        masks.append(load_mask_image(mask_path))
-    print(f"📦 Loaded {len(images)} image/mask pairs into memory")
-    return tf.data.Dataset.from_tensor_slices((np.array(images), np.array(masks))).shuffle(len(images)).batch(batch_size)
+    X.append(np.concatenate([rgb, dist], axis=0).transpose(1, 2, 0))
+    y.append(tf.keras.utils.to_categorical(mask, num_classes=n_classes))
 
-print("📂 Loading TF datasets...")
-train_ds = create_tf_dataset(train_imgs, train_masks)
-val_ds = create_tf_dataset(val_imgs, val_masks)
-test_ds = create_tf_dataset(test_imgs, test_masks)
+X = np.stack(X)
+y = np.stack(y)
 
-# === U-NET MODEL ===
-def unet_model(input_shape=(img_height, img_width, img_bands)):
-    inputs = tf.keras.Input(shape=input_shape)
-    c1 = tf.keras.layers.Conv2D(16, 3, activation='relu', padding='same')(inputs)
-    c1 = tf.keras.layers.Conv2D(16, 3, activation='relu', padding='same')(c1)
-    p1 = tf.keras.layers.MaxPooling2D(2)(c1)
+print(f"✅ Final dataset shape: {X.shape}, Labels: {y.shape}")
 
-    c2 = tf.keras.layers.Conv2D(32, 3, activation='relu', padding='same')(p1)
-    c2 = tf.keras.layers.Conv2D(32, 3, activation='relu', padding='same')(c2)
-    p2 = tf.keras.layers.MaxPooling2D(2)(c2)
+# === Train/val split ===
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.15, random_state=42)
 
-    b = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(p2)
+# === Define U-Net ===
+def conv_block(x, filters):
+    x = layers.Conv2D(filters, 3, padding='same', activation='relu')(x)
+    x = layers.Conv2D(filters, 3, padding='same', activation='relu')(x)
+    return x
 
-    u1 = tf.keras.layers.UpSampling2D(2)(b)
-    u1 = tf.keras.layers.Concatenate()([u1, c2])
-    c3 = tf.keras.layers.Conv2D(32, 3, activation='relu', padding='same')(u1)
+def unet_model(input_shape=(tile_size, tile_size, 4), n_classes=4):
+    inputs = layers.Input(shape=input_shape)
 
-    u2 = tf.keras.layers.UpSampling2D(2)(c3)
-    u2 = tf.keras.layers.Concatenate()([u2, c1])
-    c4 = tf.keras.layers.Conv2D(16, 3, activation='relu', padding='same')(u2)
+    c1 = conv_block(inputs, 32)
+    p1 = layers.MaxPooling2D()(c1)
 
-    outputs = tf.keras.layers.Conv2D(num_classes, 1, activation='softmax')(c4)
-    return tf.keras.Model(inputs, outputs)
+    c2 = conv_block(p1, 64)
+    p2 = layers.MaxPooling2D()(c2)
 
-print("🧠 Building model...")
+    c3 = conv_block(p2, 128)
+    p3 = layers.MaxPooling2D()(c3)
+
+    c4 = conv_block(p3, 256)
+    p4 = layers.MaxPooling2D()(c4)
+
+    c5 = conv_block(p4, 512)
+
+    u6 = layers.UpSampling2D()(c5)
+    u6 = layers.Concatenate()([u6, c4])
+    c6 = conv_block(u6, 256)
+
+    u7 = layers.UpSampling2D()(c6)
+    u7 = layers.Concatenate()([u7, c3])
+    c7 = conv_block(u7, 128)
+
+    u8 = layers.UpSampling2D()(c7)
+    u8 = layers.Concatenate()([u8, c2])
+    c8 = conv_block(u8, 64)
+
+    u9 = layers.UpSampling2D()(c8)
+    u9 = layers.Concatenate()([u9, c1])
+    c9 = conv_block(u9, 32)
+
+    outputs = layers.Conv2D(n_classes, 1, activation='softmax')(c9)
+
+    return models.Model(inputs, outputs)
+
+# === Custom Weighted Loss ===
+weights = tf.constant([2.5, 5.0, 1.0, 0.5], dtype=tf.float32)
+
+def weighted_cce(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.float32)
+    loss = tf.keras.losses.categorical_crossentropy(y_true, y_pred)
+    weights_map = tf.reduce_sum(y_true * weights, axis=-1)
+    return loss * weights_map
+
+# === Compile + Train ===
 model = unet_model()
-model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
+model.compile(optimizer='adam', loss=weighted_cce, metrics=['accuracy'])
 
-print("🚀 Starting training...")
-model.fit(train_ds, validation_data=val_ds, epochs=epochs)
+print("🚀 Training...")
+model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=25, batch_size=8)
 
-print("🧪 Evaluating on test set...")
-test_loss, test_acc = model.evaluate(test_ds)
-print(f"\n✅ Final test accuracy: {test_acc:.4f}")
-
-# === SAVE TO DESKTOP ===
-desktop_path = os.path.expanduser("~/Desktop/unet-4class-RGBD.keras")
-print("💾 Saving model to Desktop...")
-model.save(desktop_path)
-print(f"🎉 Done! Model saved at: {desktop_path}")
+# === Save Model ===
+os.makedirs(os.path.dirname(model_path), exist_ok=True)
+model.save(model_path)
+print(f"✅ Model saved to {model_path}")
