@@ -6,56 +6,62 @@ from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from tensorflow.keras import layers, models
 
-# === CONFIG ===
+# === CONFIGURATION ===
 rgb_dir = r"D:\UNET\tiles\images"
 dist_dir = r"D:\UNET\tiles\distance"
 mask_dir = r"D:\UNET\tiles\masks"
 model_path = r"D:\UNET\models\unet_landfastice_distance.keras"
+
 tile_size = 320
 n_classes = 4
 nodata_value = 255
 
-# === Load all tile sets ===
+# === LOAD TILES ===
 rgb_tiles = sorted(glob(os.path.join(rgb_dir, "*.tif")))
-X = []
-y = []
+X, y = [], []
 
-print(f"📦 Loading {len(rgb_tiles)} tiles...")
+print(f"📦 Scanning {len(rgb_tiles)} RGB tiles...")
 
-for rgb_tile in rgb_tiles:
-    base = os.path.basename(rgb_tile).replace(".tif", "")
-    row_col = "_".join(base.split("_")[-2:])
+for rgb_path in rgb_tiles:
+    base = os.path.basename(rgb_path).replace(".tif", "")
+    dist_path = os.path.join(dist_dir, f"{base}_distance.tif")
+    mask_path = os.path.join(mask_dir, f"{base}.tif")
 
-    dist_tile = os.path.join(dist_dir, f"{base}_distance.tif")
-    mask_tile = os.path.join(mask_dir, f"{base}.tif")
-
-    if not os.path.exists(dist_tile) or not os.path.exists(mask_tile):
+    if not os.path.exists(dist_path) or not os.path.exists(mask_path):
         continue
 
-    with rasterio.open(rgb_tile) as src:
-        rgb = src.read([1, 2, 3]).astype(np.float32) / 255.0
+    with rasterio.open(rgb_path) as src:
+        rgb = src.read([1, 2, 3]).astype(np.float32) / 255.0  # Normalize RGB
 
-    with rasterio.open(dist_tile) as src:
+    with rasterio.open(dist_path) as src:
         dist = src.read(1).astype(np.float32)
-        dist = (dist - dist.min()) / (dist.max() - dist.min() + 1e-6)
-        dist = dist[np.newaxis, :, :]
+        if np.max(dist) > 0:
+            dist = (dist - dist.min()) / (dist.max() - dist.min() + 1e-6)
+        else:
+            dist = np.zeros_like(dist)
+        dist = dist[np.newaxis, :, :]  # Add channel dimension
 
-    with rasterio.open(mask_tile) as src:
+    with rasterio.open(mask_path) as src:
         mask = src.read(1)
-        mask[mask == nodata_value] = 0  # Replace nodata with background (optional)
+        mask[mask == nodata_value] = 0  # Optional: treat NODATA as class 0
 
-    X.append(np.concatenate([rgb, dist], axis=0).transpose(1, 2, 0))
+    # Stack RGB + distance → shape: (4, H, W) → transpose to (H, W, 4)
+    input_tile = np.concatenate([rgb, dist], axis=0).transpose(1, 2, 0)
+    X.append(input_tile)
+
+    # One-hot encode mask: shape (H, W) → (H, W, n_classes)
     y.append(tf.keras.utils.to_categorical(mask, num_classes=n_classes))
 
 X = np.stack(X)
 y = np.stack(y)
 
-print(f"✅ Final dataset shape: {X.shape}, Labels: {y.shape}")
+print(f"✅ Loaded dataset: X={X.shape}, y={y.shape}")
 
-# === Train/val split ===
+# === SPLIT TRAIN/VAL ===
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.15, random_state=42)
+print(f"🧪 Split: {X_train.shape[0]} train / {X_val.shape[0]} val")
 
-# === Define U-Net ===
+# === DEFINE U-NET ===
 def conv_block(x, filters):
     x = layers.Conv2D(filters, 3, padding='same', activation='relu')(x)
     x = layers.Conv2D(filters, 3, padding='same', activation='relu')(x)
@@ -98,7 +104,7 @@ def unet_model(input_shape=(tile_size, tile_size, 4), n_classes=4):
 
     return models.Model(inputs, outputs)
 
-# === Custom Weighted Loss ===
+# === CUSTOM WEIGHTED LOSS ===
 weights = tf.constant([2.5, 5.0, 1.0, 0.5], dtype=tf.float32)
 
 def weighted_cce(y_true, y_pred):
@@ -107,14 +113,19 @@ def weighted_cce(y_true, y_pred):
     weights_map = tf.reduce_sum(y_true * weights, axis=-1)
     return loss * weights_map
 
-# === Compile + Train ===
+# === COMPILE & TRAIN ===
 model = unet_model()
 model.compile(optimizer='adam', loss=weighted_cce, metrics=['accuracy'])
 
-print("🚀 Training...")
-model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=25, batch_size=8)
+print("🚀 Training U-Net...")
+model.fit(
+    X_train, y_train,
+    validation_data=(X_val, y_val),
+    epochs=25,
+    batch_size=8
+)
 
-# === Save Model ===
+# === SAVE MODEL ===
 os.makedirs(os.path.dirname(model_path), exist_ok=True)
 model.save(model_path)
-print(f"✅ Model saved to {model_path}")
+print(f"✅ Model saved to: {model_path}")
