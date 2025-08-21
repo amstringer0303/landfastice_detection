@@ -9,8 +9,9 @@ tile_size = 320
 stride = 240  # 25% overlap
 land_threshold = 0.25  # If >25% land, skip tile
 
-# === INPUT FILES ===
+# === INPUT FILES (12 total) ===
 base_names = {
+    # --- Wainwright ---
     "Sentinel2_Wainwright_AK_20190301": {
         "rgb": r"D:\W\2019\Sentinel2_Wainwright_AK_20190301.tif",
         "mask": r"D:\UNET\masks_rasterized\20190301_mask.tif",
@@ -40,7 +41,53 @@ base_names = {
         "mask": r"D:\UNET\masks_rasterized\20240306_mask.tif",
         "dist": r"D:\UNET\distance_rasters\Sentinel2_Wainwright_AK_20240306_distance_to_coast.tif",
         "land": r"D:\UNET\landmask\Sentinel2_Wainwright_AK_20240306_landmask.tif"
-    }
+    },
+
+    # --- Arviat ---
+    "Sentinel2_Arviat_NU_20240303": {
+        "rgb": r"D:\A\drive-download-20250811T063631Z-1-001\Sentinel2_Arviat_NU_20240303.tif",
+        "mask": r"D:\UNET\masks_rasterized\20240303_mask.tif",
+        "dist": r"D:\UNET\distance_rasters\Sentinel2_Arviat_NU_20240303_distance_to_coast.tif",
+        "land": r"D:\UNET\landmask\Sentinel2_Arviat_NU_20240303_landmask.tif"
+    },
+    "Sentinel2_Arviat_NU_20240415": {
+        "rgb": r"D:\A\drive-download-20250811T063631Z-1-001\Sentinel2_Arviat_NU_20240415.tif",
+        "mask": r"D:\UNET\masks_rasterized\20240415_mask.tif",
+        "dist": r"D:\UNET\distance_rasters\Sentinel2_Arviat_NU_20240415_distance_to_coast.tif",
+        "land": r"D:\UNET\landmask\Sentinel2_Arviat_NU_20240415_landmask.tif"
+    },
+    "Sentinel2_Arviat_NU_20240326": {
+        "rgb": r"D:\A\drive-download-20250811T063631Z-1-001\Sentinel2_Arviat_NU_20240326.tif",
+        "mask": r"D:\UNET\masks_rasterized\20240326_mask.tif",
+        "dist": r"D:\UNET\distance_rasters\Sentinel2_Arviat_NU_20240326_distance_to_coast.tif",
+        "land": r"D:\UNET\landmask\Sentinel2_Arviat_NU_20240326_landmask.tif"
+    },
+    "Sentinel2_Arviat_NU_20200312": {
+        "rgb": r"D:\A\drive-download-20250501T155129Z-001\Sentinel2_Arviat_NU_20200312.tif",
+        "mask": r"D:\UNET\masks_rasterized\20200312_mask.tif",
+        "dist": r"D:\UNET\distance_rasters\Sentinel2_Arviat_NU_20200312_distance_to_coast.tif",
+        "land": r"D:\UNET\landmask\Sentinel2_Arviat_NU_20200312_landmask.tif"
+    },
+    "Sentinel2_Arviat_NU_20240427": {
+        "rgb": r"D:\A\drive-download-20250811T063631Z-1-001\Sentinel2_Arviat_NU_20240427.tif",
+        "mask": r"D:\UNET\masks_rasterized\20240427_mask.tif",
+        "dist": r"D:\UNET\distance_rasters\Sentinel2_Arviat_NU_20240427_distance_to_coast.tif",
+        "land": r"D:\UNET\landmask\Sentinel2_Arviat_NU_20240427_landmask.tif"
+    },
+
+    # --- Barrow ---
+    "Sentinel2_Barrow_AK_20220401": {
+        "rgb": r"D:\barrow\Sentinel2_Barrow_AK_20220401.tif",
+        "mask": r"D:\UNET\masks_rasterized\20220401_mask.tif",
+        "dist": r"D:\UNET\distance_rasters\Sentinel2_Barrow_AK_20220401_distance_to_coast.tif",
+        "land": r"D:\UNET\landmask\Sentinel2_Barrow_AK_20220401_landmask.tif"
+    },
+    "Sentinel2_Barrow_AK_20220416": {
+        "rgb": r"D:\barrow\Sentinel2_Barrow_AK_20220416(1).tif",
+        "mask": r"D:\UNET\masks_rasterized\20220416_mask.tif",
+        "dist": r"D:\UNET\distance_rasters\Sentinel2_Barrow_AK_20220416_distance_to_coast.tif",
+        "land": r"D:\UNET\landmask\Sentinel2_Barrow_AK_20220416_landmask.tif"
+    },
 }
 
 # === OUTPUT DIRECTORIES ===
@@ -88,12 +135,9 @@ for base, paths in base_names.items():
                 land_tile = land_src.read(1, window=window)
 
                 # --- FILTERS ---
-                # Skip if majority land
                 if np.mean(land_tile == 1) > land_threshold:
                     skipped += 1
                     continue
-
-                # Skip if mask is only water/ignore
                 if set(np.unique(mask_tile)).issubset({0, 255}):
                     skipped += 1
                     continue
@@ -118,4 +162,3 @@ for base, paths in base_names.items():
                 count += 1
 
         print(f"✅ Done: {count} saved | 🗑️ {skipped} skipped")
-
