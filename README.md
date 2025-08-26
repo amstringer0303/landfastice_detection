@@ -120,17 +120,6 @@ The pipeline uses a 4-channel input — combining RGB with a computed **distance
   - `predictions/*_stitched_overlay.png`
   - *(Optional)*: predicted raw masks or extracted boundaries
 
----
-
-## Coming Soon 
-
-- **`extract_landfast_edge.py`**  
-  Automatically vectorizes class 1 (landfast ice) edges into GeoJSON
-
-- **Evaluation Utilities**
-  - IoU / accuracy calculation on held-out annotated tiles
-  - Confusion matrices
-  - Visual diff overlays
 
 ## Maintainer
 
