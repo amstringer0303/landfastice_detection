@@ -1,0 +1,96 @@
+import os
+import numpy as np
+import rasterio
+import pandas as pd
+from scipy.spatial.distance import directed_hausdorff
+from skimage.morphology import binary_erosion
+from sklearn.neighbors import NearestNeighbors
+
+# === CONFIGURATION ===
+pred_dir = r"D:\UNET\stitched_predictions"
+gt_dir = r"D:\UNET\masks_rasterized"
+scenes = [
+    "Sentinel2_Wainwright_AK_20190301",
+    "Sentinel2_Wainwright_AK_20220310",
+    "Sentinel2_Wainwright_AK_20220418",
+    "Sentinel2_Wainwright_AK_20230423",
+    "Sentinel2_Wainwright_AK_20240306",
+    "Sentinel2_Arviat_NU_20200312",
+    "Sentinel2_Arviat_NU_20240303",
+    "Sentinel2_Arviat_NU_20240326",
+    "Sentinel2_Arviat_NU_20240415",
+    "Sentinel2_Arviat_NU_20240427",
+    "Sentinel2_Barrow_AK_20220401"
+]
+
+def extract_edge(mask):
+    edge = mask.astype(bool) ^ binary_erosion(mask.astype(bool))
+    return np.argwhere(edge)
+
+def safe_distance_metrics(pred_pts, gt_pts):
+    if len(pred_pts) < 2 or len(gt_pts) < 2:
+        return np.nan, np.nan, np.nan
+
+    # Hausdorff (symmetric)
+    hd = max(
+        directed_hausdorff(pred_pts, gt_pts)[0],
+        directed_hausdorff(gt_pts, pred_pts)[0]
+    )
+
+    # Nearest neighbor distances
+    nn_pred = NearestNeighbors(n_neighbors=1).fit(gt_pts)
+    dists_pred_to_gt, _ = nn_pred.kneighbors(pred_pts)
+
+    nn_gt = NearestNeighbors(n_neighbors=1).fit(pred_pts)
+    dists_gt_to_pred, _ = nn_gt.kneighbors(gt_pts)
+
+    avg_hd = np.mean(dists_pred_to_gt)
+    mad = np.mean(dists_pred_to_gt) + np.mean(dists_gt_to_pred)
+    mad /= 2.0
+
+    return hd, avg_hd, mad
+
+# === MAIN LOOP ===
+records = []
+
+for scene in scenes:
+    date_str = scene.split("_")[-1]
+    pred_path = os.path.join(pred_dir, f"{scene}_stitched_pred.tif")
+    gt_path = os.path.join(gt_dir, f"{date_str}_mask.tif")
+
+    if not os.path.exists(pred_path) or not os.path.exists(gt_path):
+        print(f"❌ Missing prediction or ground truth for {scene}")
+        continue
+
+    with rasterio.open(pred_path) as src:
+        pred = src.read(1)
+    with rasterio.open(gt_path) as src:
+        gt = src.read(1)
+
+    pred_edge = extract_edge(pred == 1)
+    gt_edge = extract_edge(gt == 1)
+
+    if len(pred_edge) == 0 or len(gt_edge) == 0:
+        print(f"⚠️ No edge found in {scene}")
+        continue
+
+    hd, avg_hd, mad = safe_distance_metrics(pred_edge, gt_edge)
+
+    records.append({
+        "scene": scene,
+        "hausdorff_dist": hd,
+        "avg_hausdorff": avg_hd,
+        "mean_abs_dist": mad,
+        "num_pred_edge_pts": len(pred_edge),
+        "num_gt_edge_pts": len(gt_edge)
+    })
+
+    print(f"✅ {scene} — HD: {hd:.2f}, AvgHD: {avg_hd:.2f}, MAD: {mad:.2f}")
+
+# === Save
+if records:
+    df = pd.DataFrame(records)
+    df.to_csv("landfast_ice_edge_accuracy_metrics.csv", index=False)
+    print("\n📁 Saved results to 'landfast_ice_edge_accuracy_metrics.csv'")
+else:
+    print("\n⚠️ No valid scenes were processed.")
